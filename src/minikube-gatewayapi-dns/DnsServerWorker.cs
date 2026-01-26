@@ -8,16 +8,14 @@ namespace minikube_gatewayapi_dns
 {
     internal class DnsServerWorker : BackgroundService
     {
-        private readonly MasterFile _masterFile;
         private readonly ILogger<DnsServerWorker> _logger;
         private readonly DnsServer _server;
 
         public DnsServerWorker(MasterFile masterFile, ILogger<DnsServerWorker> logger)
         {
-            _masterFile = masterFile;
             _logger = logger;
 
-            _server = new DnsServer(_masterFile);
+            _server = new DnsServer(masterFile);
         }
 
         public override Task StartAsync(CancellationToken cancellationToken)
@@ -60,14 +58,10 @@ namespace minikube_gatewayapi_dns
                 _logger.LogError(e.Exception, "Response Error: {0}", responseError.Response);
         }
 
-        private void OnServerOnListening(object? sender, EventArgs e)
-        {
+        private void OnServerOnListening(object? sender, EventArgs e) => 
             _logger.LogInformation("DNS Server Listening");
-        }
 
-        private void OnServerOnResponded(object? sender, DnsServer.RespondedEventArgs e)
-        {
-            _logger.LogInformation("{0} => {1}", e.Request, e.Response);
-        }
+        private void OnServerOnResponded(object? sender, DnsServer.RespondedEventArgs e) => 
+            _logger.LogTrace("{0} => {1}", e.Request, e.Response);
     }
 }
