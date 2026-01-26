@@ -8,7 +8,11 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        architecture: [amd64, arm64]
+
+      runs-on: ubuntu-24.04-${{ matrix.architecture }}
 
     steps:
     - uses: actions/checkout@v4
@@ -27,6 +31,7 @@ jobs:
         tags: |
           type=raw,value={{date 'YYYYMMDDHHmmss' tz='America/Vancouver'}}
           type=ref,event=branch,pattern=main,value=latest
+          type=raw,value=latest,enable=${{ is_default_branch }}
 #         type=semver,pattern={{version}}
 #         type=semver,pattern={{major}}.{{minor}}
 
