@@ -3,19 +3,13 @@ using k8s.Models;
 
 namespace k8s.GatewayApi.Model.Extensions;
 
-public static class IKubernetesObjectExtensions
+public static class KubernetesObjectExtensions
 {
-    public static KubernetesEntityAttribute? GetKubernetesEntityAttribute(this IKubernetesObject kubernetesObject) => 
-        kubernetesObject.GetType().GetCustomAttribute<KubernetesEntityAttribute>();
-
     public static KubernetesEntityAttribute? GetKubernetesEntityAttribute<T>() where T : IKubernetesObject => 
         typeof(T).GetCustomAttribute<KubernetesEntityAttribute>();
 
     public static string GetKubernetesEntityGroup<T>() where T : IKubernetesObject => 
         GetKubernetesEntityAttribute<T>()?.Group ?? string.Empty;
-
-    public static string GetKubernetesEntityKind<T>() where T : IKubernetesObject =>
-        GetKubernetesEntityAttribute<T>()?.Kind ?? string.Empty;
 
     public static string GetKubernetesEntityVersion<T>() where T : IKubernetesObject =>
         GetKubernetesEntityAttribute<T>()?.ApiVersion ?? string.Empty;

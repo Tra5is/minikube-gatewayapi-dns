@@ -1,5 +1,4 @@
-﻿using DNS.Server;
-using k8s;
+﻿using k8s;
 using k8s.GatewayApi.Model;
 using k8s.GatewayApi.Model.Extensions;
 using k8s.Models;
@@ -11,14 +10,12 @@ namespace minikube_gatewayapi_dns
     internal class ResourceChangesWatcher<TResource> : BackgroundService
         where TResource : IKubernetesObject
     {
-        private readonly MasterFile _masterFile;
+        private readonly ConcurrentMasterFile _masterFile;
         private readonly ILogger<ResourceChangesWatcher<TResource>> _logger;
-        private readonly Kubernetes _client;
         private readonly GenericClient _typedClient;
-
-        private static string GatewaysCrdName = "gateways.gateway.networking.k8s.io";
-
-        public ResourceChangesWatcher(MasterFile masterFile, ILogger<ResourceChangesWatcher<TResource>> logger)
+        private readonly string _dnsServerIp = Environment.GetEnvironmentVariable("POD_IP") ?? "127.0.0.1";
+        
+        public ResourceChangesWatcher(ConcurrentMasterFile masterFile, ILogger<ResourceChangesWatcher<TResource>> logger)
         {
             _masterFile = masterFile;
             _logger = logger;
@@ -26,11 +23,11 @@ namespace minikube_gatewayapi_dns
             var config = IsRunningInKubePod()
                 ? KubernetesClientConfiguration.InClusterConfig()
                 : KubernetesClientConfiguration.BuildConfigFromConfigFile();
-            _client = new Kubernetes(config);
-            _typedClient = new GenericClient(_client, 
-                IKubernetesObjectExtensions.GetKubernetesEntityGroup<TResource>(), 
-                IKubernetesObjectExtensions.GetKubernetesEntityVersion<TResource>(), 
-                IKubernetesObjectExtensions.GetKubernetesEntityPluralName<TResource>());
+            var client = new Kubernetes(config);
+            _typedClient = new GenericClient(client, 
+                KubernetesObjectExtensions.GetKubernetesEntityGroup<TResource>(), 
+                KubernetesObjectExtensions.GetKubernetesEntityVersion<TResource>(), 
+                KubernetesObjectExtensions.GetKubernetesEntityPluralName<TResource>());
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -78,18 +75,38 @@ namespace minikube_gatewayapi_dns
                 _logger.LogTrace(
                     $"watchedEvent {watchEventType} : {System.Text.Json.JsonSerializer.Serialize(resource)}");
 
-                if (watchEventType == WatchEventType.Added || watchEventType == WatchEventType.Modified)
-                {
-                    var hostnames = GetHostnames(resource);
-                    var dnsServerIp = Environment.GetEnvironmentVariable("POD_IP") ?? "127.0.0.1";
-
-                    foreach(var host in hostnames)
-                    {
-                        _logger.LogInformation($"Creating DNS entry for {host} to point to {dnsServerIp}");
-                        _masterFile.AddIPAddressResourceRecord(host, dnsServerIp);
-                    }
-                }
+                if (watchEventType == WatchEventType.Added)
+                    HandleAdded(resource);
+                else if (watchEventType == WatchEventType.Modified)
+                    HandleModified(resource);
+                else if (watchEventType == WatchEventType.Deleted)
+                    HandleDeleted(resource);
+                else
+                    _logger.LogTrace($"Unhandled watch event type: {watchEventType} for {resource.Kind}");
             }
+        }
+
+        private void HandleAdded(TResource resource)
+        {
+            var hostnames = GetHostnames(resource);
+
+            foreach (var host in hostnames)
+            {
+                _logger.LogInformation($"Creating DNS entry for {host} to point to {_dnsServerIp}");
+                _masterFile.AddIPAddressResourceRecord(GetResourceId(resource), host, _dnsServerIp);
+            }
+        }
+
+        private void HandleDeleted(TResource resource)
+        {
+            _logger.LogInformation($"Removing DNS entries for {typeof(TResource).Name}: {GetResourceName(resource)}");
+            _masterFile.RemoveIPAddressResourceRecord(GetResourceId(resource));
+        }
+
+        private void HandleModified(TResource resource)
+        {
+            HandleDeleted(resource);
+            HandleAdded(resource);
         }
 
         private async Task<bool> IsResourceFoundAsync(CancellationToken cancellationToken)
@@ -114,10 +131,28 @@ namespace minikube_gatewayapi_dns
         private string[] GetHostnames(object resource) =>
             resource switch
             {
-                HttpRoute route => route.Spec.Hostnames.ToArray(),
-                GrpcRoute grpcRoute => grpcRoute.Spec.Hostnames.ToArray(),
+                V1HttpRoute httpRoute => httpRoute.Spec.Hostnames.ToArray(),
+                V1GrpcRoute grpcRoute => grpcRoute.Spec.Hostnames.ToArray(),
                 V1Ingress v1Ingress => v1Ingress.Spec.Rules.Select(rule => rule.Host).ToArray(),
                 _ => throw new InvalidOperationException($"GetHostnames: Unexpected type of resource {resource.GetType().Name}")
+            };
+
+        private string GetResourceId(object resource) =>
+            resource switch
+            {
+                V1HttpRoute httpRoute => httpRoute.Uid(),
+                V1GrpcRoute grpcRoute => grpcRoute.Uid(),
+                V1Ingress v1Ingress => v1Ingress.Uid(),
+                _ => throw new InvalidOperationException($"GetResourceId: Unexpected type of resource {resource.GetType().Name}")
+            };
+
+        private string GetResourceName(object resource) =>
+            resource switch
+            {
+                V1HttpRoute httpRoute => httpRoute.Name(),
+                V1GrpcRoute grpcRoute => grpcRoute.Name(),
+                V1Ingress v1Ingress => v1Ingress.Name(),
+                _ => throw new InvalidOperationException($"GetResourceName: Unexpected type of resource {resource.GetType().Name}")
             };
     }
 }
