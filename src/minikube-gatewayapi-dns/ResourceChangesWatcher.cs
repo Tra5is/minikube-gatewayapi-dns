@@ -44,6 +44,30 @@ namespace minikube_gatewayapi_dns
                 await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
             }
 
+            await RetryOnException(stoppingToken, WatchResourceChanges);
+        }
+
+        private async Task RetryOnException(CancellationToken cancellationToken, Func<CancellationToken, Task> doThis)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                return;
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await doThis(cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Exception watching resource {typeof(TResource).Name}: {ex.Message} ({ex.GetType().Name})");
+                    _logger.LogTrace(ex, ex.Message);
+                }
+            }
+        }
+
+        private async Task WatchResourceChanges(CancellationToken stoppingToken)
+        {
             var resources =
                 _typedClient.WatchAsync<TResource>(cancel: stoppingToken);
 
