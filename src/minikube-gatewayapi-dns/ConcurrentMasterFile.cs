@@ -91,14 +91,13 @@ internal class ConcurrentMasterFile : IRequestResolver
 
     private static bool Matches(Domain domain, Domain entry)
     {
-        //TODO: rewrite this to use a constant regex
-        string[] strArray1 = entry.ToString().Split('.');
-        string[] strArray2 = new string[strArray1.Length];
-        for (int index = 0; index < strArray1.Length; ++index)
-        {
-            string str = strArray1[index];
-            strArray2[index] = str == "*" ? "(\\w+)" : Regex.Escape(str);
-        }
-        return new Regex($"^{string.Join("\\.", strArray2)}$", RegexOptions.IgnoreCase).IsMatch(domain.ToString());
+        var regexStr = entry.ToString()
+            .Split('.')
+            .Select(EscapeAndMatchWildcard)
+            .Join("\\.");
+        return new Regex($"^{regexStr}$", RegexOptions.IgnoreCase).IsMatch(domain.ToString());
     }
+
+    private static string EscapeAndMatchWildcard(string strPart) =>
+        strPart == "*" ? "(\\w+)" : Regex.Escape(strPart);
 }
