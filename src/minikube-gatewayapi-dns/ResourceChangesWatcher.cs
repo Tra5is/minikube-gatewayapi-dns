@@ -105,6 +105,7 @@ namespace minikube_gatewayapi_dns
 
         private void HandleModified(TResource resource)
         {
+            _logger.LogInformation($"{typeof(TResource).Name}: {GetResourceName(resource)} is modified");
             HandleDeleted(resource);
             HandleAdded(resource);
         }
