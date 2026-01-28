@@ -14,4 +14,7 @@ public static class EnumerableExtensions
         }
         return source;
     }
+
+    public static string Join(this IEnumerable<string> strParts, string separator) =>
+        string.Join(separator, strParts);
 }
