@@ -1,5 +1,5 @@
 # Build stage
-FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
+FROM dhi.io/dotnet:10-sdk AS build
 
 WORKDIR /src
 
@@ -17,7 +17,7 @@ COPY src/ .
 RUN dotnet publish "./minikube-gatewayapi-dns/minikube-gatewayapi-dns.csproj" -c Release -o /app/publish
 
 # Runtime stage
-FROM mcr.microsoft.com/dotnet/runtime:10.0-alpine
+FROM dhi.io/dotnet:10
 
 WORKDIR /app
 
