@@ -13,7 +13,7 @@ namespace minikube_gatewayapi_dns;
 
 internal class ConcurrentMasterFile : IRequestResolver
 {
-    private record ResourceRecordKey(string ResourceId, Domain Domain, RecordType Type);
+    private record ResourceRecordKey(string ResourceId, Domain Domain, RecordType Type, IPAddress Address);
 
     protected static readonly TimeSpan DEFAULT_TTL = new TimeSpan(0L);
 
@@ -30,12 +30,23 @@ internal class ConcurrentMasterFile : IRequestResolver
         IResponse result = Response.FromRequest(request);
         foreach (Question question in request.Questions)
         {
-            var l2 = this.Get(question);
-            if (l2.Count > 0)
-                foreach(var answer in l2)
+            var matches = this.Get(question);
+            if (matches.Count > 0)
+            {
+                foreach (var answer in matches)
                     result.AnswerRecords.Add(answer);
+            }
             else
-                result.ResponseCode = ResponseCode.NameError;
+            {
+                // RFC 2308 §2.2: if the name exists but no records of the requested type
+                // exist, return NOERROR with zero answers (NODATA). Only return NXDOMAIN
+                // when the name has no records of any type — otherwise resolvers will
+                // negative-cache the absence of the entire name (e.g. an AAAA NXDOMAIN
+                // would suppress subsequent A lookups on Windows DNS Client).
+                var anyTypeMatches = this.Get(question.Name, RecordType.ANY);
+                if (anyTypeMatches.Count == 0)
+                    result.ResponseCode = ResponseCode.NameError;
+            }
         }
         return Task.FromResult(result);
     }
@@ -45,7 +56,7 @@ internal class ConcurrentMasterFile : IRequestResolver
 
     public bool AddIPAddressResourceRecord(string resourceId, Domain domain, IPAddress ipAddress) =>
         threadSafeEntries.TryAdd(
-            new ResourceRecordKey(resourceId, domain, RecordType.A),
+            new ResourceRecordKey(resourceId, domain, RecordType.A, ipAddress),
             new IPAddressResourceRecord(domain, ipAddress, DEFAULT_TTL));
 
     // ReSharper disable once InconsistentNaming

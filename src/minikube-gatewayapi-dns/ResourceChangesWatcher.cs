@@ -1,32 +1,33 @@
-﻿using k8s;
-using k8s.GatewayApi.Model;
+using k8s;
 using k8s.GatewayApi.Model.Extensions;
 using k8s.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using minikube_gatewayapi_dns.Watchers;
 
 namespace minikube_gatewayapi_dns
 {
     internal class ResourceChangesWatcher<TResource> : BackgroundService
-        where TResource : IKubernetesObject
+        where TResource : class, IKubernetesObject<V1ObjectMeta>, new()
     {
-        private readonly ConcurrentMasterFile _masterFile;
+        private readonly IWatchEventHandler<TResource> _handler;
         private readonly ILogger<ResourceChangesWatcher<TResource>> _logger;
         private readonly GenericClient _typedClient;
-        private readonly string _dnsServerIp = Environment.GetEnvironmentVariable("POD_IP") ?? "127.0.0.1";
-        
-        public ResourceChangesWatcher(ConcurrentMasterFile masterFile, ILogger<ResourceChangesWatcher<TResource>> logger)
+
+        public ResourceChangesWatcher(
+            IWatchEventHandler<TResource> handler,
+            ILogger<ResourceChangesWatcher<TResource>> logger)
         {
-            _masterFile = masterFile;
+            _handler = handler;
             _logger = logger;
 
             var config = IsRunningInKubePod()
                 ? KubernetesClientConfiguration.InClusterConfig()
                 : KubernetesClientConfiguration.BuildConfigFromConfigFile();
             var client = new Kubernetes(config);
-            _typedClient = new GenericClient(client, 
-                KubernetesObjectExtensions.GetKubernetesEntityGroup<TResource>(), 
-                KubernetesObjectExtensions.GetKubernetesEntityVersion<TResource>(), 
+            _typedClient = new GenericClient(client,
+                KubernetesObjectExtensions.GetKubernetesEntityGroup<TResource>(),
+                KubernetesObjectExtensions.GetKubernetesEntityVersion<TResource>(),
                 KubernetesObjectExtensions.GetKubernetesEntityPluralName<TResource>());
         }
 
@@ -37,7 +38,9 @@ namespace minikube_gatewayapi_dns
 
             while (await IsResourceFoundAsync(stoppingToken) == false)
             {
-                _logger.LogWarning($"The resource type {typeof(TResource).Name} cannot be found. Waiting 10 seconds before trying again...");
+                _logger.LogWarning(
+                    "The resource type {ResourceType} cannot be found. Waiting 10 seconds before trying again...",
+                    typeof(TResource).Name);
                 await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
             }
 
@@ -57,57 +60,41 @@ namespace minikube_gatewayapi_dns
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError($"Exception watching resource {typeof(TResource).Name}: {ex.Message} ({ex.GetType().Name})");
-                    _logger.LogTrace(ex, ex.Message);
+                    _logger.LogError("Exception watching resource {ResourceType}: {Message} ({Type})",
+                        typeof(TResource).Name, ex.Message, ex.GetType().Name);
+                    _logger.LogTrace(ex, "{Message}", ex.Message);
                 }
             }
         }
 
         private async Task WatchResourceChanges(CancellationToken stoppingToken)
         {
-            var resources =
-                _typedClient.WatchAsync<TResource>(cancel: stoppingToken);
+            var resources = _typedClient.WatchAsync<TResource>(cancel: stoppingToken);
 
-            _logger.LogInformation($"Watching for changes to {typeof(TResource).Name}...");
+            _logger.LogInformation("Watching for changes to {ResourceType}...", typeof(TResource).Name);
 
             await foreach (var (watchEventType, resource) in resources)
             {
-                _logger.LogTrace(
-                    $"watchedEvent {watchEventType} : {System.Text.Json.JsonSerializer.Serialize(resource)}");
+                _logger.LogTrace("watchedEvent {EventType} : {Resource}",
+                    watchEventType, System.Text.Json.JsonSerializer.Serialize(resource));
 
-                if (watchEventType == WatchEventType.Added)
-                    HandleAdded(resource);
-                else if (watchEventType == WatchEventType.Modified)
-                    HandleModified(resource);
-                else if (watchEventType == WatchEventType.Deleted)
-                    HandleDeleted(resource);
-                else
-                    _logger.LogTrace($"Unhandled watch event type: {watchEventType} for {resource.Kind}");
+                switch (watchEventType)
+                {
+                    case WatchEventType.Added:
+                        _handler.OnAdded(resource);
+                        break;
+                    case WatchEventType.Modified:
+                        _handler.OnModified(resource);
+                        break;
+                    case WatchEventType.Deleted:
+                        _handler.OnDeleted(resource);
+                        break;
+                    default:
+                        _logger.LogTrace("Unhandled watch event type: {EventType} for {Kind}",
+                            watchEventType, resource.Kind);
+                        break;
+                }
             }
-        }
-
-        private void HandleAdded(TResource resource)
-        {
-            var hostnames = GetHostnames(resource);
-
-            foreach (var host in hostnames)
-            {
-                _logger.LogInformation($"Creating DNS entry for {host} to point to {_dnsServerIp}");
-                _masterFile.AddIPAddressResourceRecord(GetResourceId(resource), host, _dnsServerIp);
-            }
-        }
-
-        private void HandleDeleted(TResource resource)
-        {
-            _logger.LogInformation($"Removing DNS entries for {typeof(TResource).Name}: {GetResourceName(resource)}");
-            _masterFile.RemoveIPAddressResourceRecord(GetResourceId(resource));
-        }
-
-        private void HandleModified(TResource resource)
-        {
-            _logger.LogInformation($"{typeof(TResource).Name}: {GetResourceName(resource)} is modified");
-            HandleDeleted(resource);
-            HandleAdded(resource);
         }
 
         private async Task<bool> IsResourceFoundAsync(CancellationToken cancellationToken)
@@ -121,39 +108,11 @@ namespace minikube_gatewayapi_dns
             {
                 if (ex.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
                     return false;
-
                 throw;
             }
         }
 
-        private bool IsRunningInKubePod() => 
+        private static bool IsRunningInKubePod() =>
             !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("KUBERNETES_PORT"));
-
-        private string[] GetHostnames(object resource) =>
-            resource switch
-            {
-                V1HttpRoute httpRoute => httpRoute.Spec.Hostnames.ToArray(),
-                V1GrpcRoute grpcRoute => grpcRoute.Spec.Hostnames.ToArray(),
-                V1Ingress v1Ingress => v1Ingress.Spec.Rules.Select(rule => rule.Host).ToArray(),
-                _ => throw new InvalidOperationException($"GetHostnames: Unexpected type of resource {resource.GetType().Name}")
-            };
-
-        private string GetResourceId(object resource) =>
-            resource switch
-            {
-                V1HttpRoute httpRoute => httpRoute.Uid(),
-                V1GrpcRoute grpcRoute => grpcRoute.Uid(),
-                V1Ingress v1Ingress => v1Ingress.Uid(),
-                _ => throw new InvalidOperationException($"GetResourceId: Unexpected type of resource {resource.GetType().Name}")
-            };
-
-        private string GetResourceName(object resource) =>
-            resource switch
-            {
-                V1HttpRoute httpRoute => httpRoute.Name(),
-                V1GrpcRoute grpcRoute => grpcRoute.Name(),
-                V1Ingress v1Ingress => v1Ingress.Name(),
-                _ => throw new InvalidOperationException($"GetResourceName: Unexpected type of resource {resource.GetType().Name}")
-            };
     }
 }

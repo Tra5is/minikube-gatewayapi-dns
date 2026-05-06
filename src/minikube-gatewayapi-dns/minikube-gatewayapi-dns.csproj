@@ -29,6 +29,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="minikube-gatewayapi-dns.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="appsettings.Development.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
