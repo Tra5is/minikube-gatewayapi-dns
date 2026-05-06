@@ -15,6 +15,7 @@ internal class RouteDnsRecordEventHandler<TResource> : IWatchEventHandler<TResou
 
     private readonly ConcurrentMasterFile _masterFile;
     private readonly IAddressResolver<TResource> _resolver;
+    private readonly IHostnameSource<TResource> _hostnameSource;
     private readonly GatewayCache _gatewayCache;
     private readonly ILogger<RouteDnsRecordEventHandler<TResource>> _logger;
     private readonly ConcurrentDictionary<string, TResource> _knownRoutes = new();
@@ -22,11 +23,13 @@ internal class RouteDnsRecordEventHandler<TResource> : IWatchEventHandler<TResou
     public RouteDnsRecordEventHandler(
         ConcurrentMasterFile masterFile,
         IAddressResolver<TResource> resolver,
+        IHostnameSource<TResource> hostnameSource,
         GatewayCache gatewayCache,
         ILogger<RouteDnsRecordEventHandler<TResource>> logger)
     {
         _masterFile = masterFile;
         _resolver = resolver;
+        _hostnameSource = hostnameSource;
         _gatewayCache = gatewayCache;
         _logger = logger;
         _gatewayCache.Subscribe(OnGatewayChanged);
@@ -63,7 +66,7 @@ internal class RouteDnsRecordEventHandler<TResource> : IWatchEventHandler<TResou
         }
 
         var resourceId = resource.Uid();
-        foreach (var host in resource.Spec.Hostnames)
+        foreach (var host in _hostnameSource.GetHostnames(resource))
         foreach (var addr in addresses)
         {
             _masterFile.AddIPAddressResourceRecord(resourceId, new Domain(host), addr);

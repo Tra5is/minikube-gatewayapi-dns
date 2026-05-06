@@ -23,6 +23,13 @@ builder.Services.AddSingleton<IUpstreamResolver, SystemUpstreamResolver>();
 builder.Services.AddSingleton<IAddressResolver<V1Ingress>, IngressAddressResolver>();
 builder.Services.AddSingleton<IAddressResolver<V1HttpRoute>, RouteAddressResolver<V1HttpRoute>>();
 builder.Services.AddSingleton<IAddressResolver<V1GrpcRoute>, RouteAddressResolver<V1GrpcRoute>>();
+builder.Services.AddSingleton<IAddressResolver<V1TcpRoute>, RouteAddressResolver<V1TcpRoute>>();
+builder.Services.AddSingleton<IAddressResolver<V1UdpRoute>, RouteAddressResolver<V1UdpRoute>>();
+
+builder.Services.AddSingleton<IHostnameSource<V1HttpRoute>, SpecHostnameSource<V1HttpRoute>>();
+builder.Services.AddSingleton<IHostnameSource<V1GrpcRoute>, SpecHostnameSource<V1GrpcRoute>>();
+builder.Services.AddSingleton<IHostnameSource<V1TcpRoute>, AnnotationHostnameSource<V1TcpRoute>>();
+builder.Services.AddSingleton<IHostnameSource<V1UdpRoute>, AnnotationHostnameSource<V1UdpRoute>>();
 
 var fallbackIp = Environment.GetEnvironmentVariable("POD_IP") ?? "127.0.0.1";
 
@@ -35,11 +42,15 @@ builder.Services.AddSingleton<IWatchEventHandler<V1Ingress>>(sp =>
 
 builder.Services.AddSingleton<IWatchEventHandler<V1HttpRoute>, RouteDnsRecordEventHandler<V1HttpRoute>>();
 builder.Services.AddSingleton<IWatchEventHandler<V1GrpcRoute>, RouteDnsRecordEventHandler<V1GrpcRoute>>();
+builder.Services.AddSingleton<IWatchEventHandler<V1TcpRoute>, RouteDnsRecordEventHandler<V1TcpRoute>>();
+builder.Services.AddSingleton<IWatchEventHandler<V1UdpRoute>, RouteDnsRecordEventHandler<V1UdpRoute>>();
 builder.Services.AddSingleton<IWatchEventHandler<V1Gateway>, GatewayCacheEventHandler>();
 
 builder.Services.AddHostedService<ResourceChangesWatcher<V1Gateway>>();
 builder.Services.AddHostedService<ResourceChangesWatcher<V1HttpRoute>>();
 builder.Services.AddHostedService<ResourceChangesWatcher<V1GrpcRoute>>();
+builder.Services.AddHostedService<ResourceChangesWatcher<V1TcpRoute>>();
+builder.Services.AddHostedService<ResourceChangesWatcher<V1UdpRoute>>();
 builder.Services.AddHostedService<ResourceChangesWatcher<V1Ingress>>();
 builder.Services.AddHostedService<DnsServerWorker>();
 
